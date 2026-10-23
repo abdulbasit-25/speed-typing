@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": ["api/**/*.ts", "server/**/*.ts", "scripts/**/*.ts", "shared/**/*.ts", "tests/**/*.ts", "vite.config.ts", "client/src/**/*.ts", "client/src/**/*.tsx"],
+  "exclude": ["node_modules", "dist", ".vercel"]
+}
