@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculateScore, normalizeUsername } from "../server/services/scoring.js";
+import { calculateScore, normalizeUsername, selectPrimaryScore } from "../server/services/scoring.js";
 
 test("calculates authoritative typing metrics from typed text and elapsed time", () => {
   assert.deepEqual(calculateScore("abcde", "abcXe", 60), {
@@ -35,4 +35,10 @@ test("normalizes usernames consistently without altering their display form", ()
     username: "Team_Vanguard",
     normalized: "team_vanguard",
   });
+});
+
+test("selects the configured score for ranking", () => {
+  const score = calculateScore("abcdefghij", "abcXXXXXij", 60);
+  assert.equal(selectPrimaryScore(score, "netWpm"), score.netWpm);
+  assert.equal(selectPrimaryScore(score, "grossWpm"), score.grossWpm);
 });
