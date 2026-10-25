@@ -1,4 +1,5 @@
-import { Schema, model, models } from "mongoose";
+import mongoose from "mongoose";
+const { Schema } = mongoose;
 
 const adminSchema = new Schema(
   {
@@ -11,4 +12,4 @@ const adminSchema = new Schema(
   { timestamps: true, versionKey: false },
 );
 
-export const Admin = models.Admin ?? model("Admin", adminSchema);
+export const Admin = mongoose.models.Admin ?? mongoose.model("Admin", adminSchema);
