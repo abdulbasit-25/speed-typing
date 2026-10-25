@@ -173,4 +173,6 @@ Vercel deployments and Atlas egress must be configured in the same environments.
 
 Database and token credentials were pasted into the development conversation. Treat them as compromised: rotate the MongoDB database user's password in Atlas, generate a new random `SESSION_SECRET`, update local/Vercel environment variables, and redeploy. Do not reuse the exposed values.
 
+## admin command
+
 npm run admin:create

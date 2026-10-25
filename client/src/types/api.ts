@@ -96,6 +96,7 @@ export interface TypingPassageRecord {
   text: string;
   difficulty: "beginner" | "intermediate" | "advanced";
   active: boolean;
+  attemptCount: number;
   createdAt?: string;
 }
 

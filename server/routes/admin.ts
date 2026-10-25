@@ -12,7 +12,7 @@ import { Competition } from "../models/Competition.js";
 import { Participant } from "../models/Participant.js";
 import { TypingAttempt } from "../models/TypingAttempt.js";
 import { TypingPassage } from "../models/TypingPassage.js";
-import { getCurrentCompetition } from "../services/competition.js";
+import { getCurrentCompetition, isDuplicateKeyError } from "../services/competition.js";
 import { getBestAttempts } from "../services/ranking.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError } from "../utils/AppError.js";
@@ -327,16 +327,36 @@ router.patch("/attempts/:attemptId/invalidate", requireAdmin, requireCsrf, async
 router.get("/passages", requireAdmin, asyncHandler(async (_request, response) => {
   await connectToDatabase();
   const competition = await getCurrentCompetition();
-  const passages = await TypingPassage.find({ competitionId: competition._id }).select("title text difficulty active createdAt").sort({ createdAt: 1 }).lean();
-  response.json({ passages: passages.map((passage) => ({ id: passage._id.toString(), ...passage })) });
+  const [passages, attemptCounts] = await Promise.all([
+    TypingPassage.find({ competitionId: competition._id }).select("title text difficulty active createdAt").sort({ createdAt: 1 }).lean(),
+    TypingAttempt.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
+      { $match: { competitionId: competition._id } },
+      { $group: { _id: "$passageId", count: { $sum: 1 } } },
+    ]),
+  ]);
+  const countsByPassageId = new Map(attemptCounts.map(({ _id, count }) => [_id.toString(), count]));
+  response.json({
+    passages: passages.map((passage) => ({
+      id: passage._id.toString(),
+      ...passage,
+      attemptCount: countsByPassageId.get(passage._id.toString()) ?? 0,
+    })),
+  });
 }));
 
 router.post("/passages", requireAdmin, requireCsrf, asyncHandler(async (request, response) => {
   const body = passageSchema.parse(request.body);
   await connectToDatabase();
   const competition = await getCurrentCompetition();
-  await rejectActiveAttempts(competition.id);
-  const passage = await TypingPassage.create({ ...body, competitionId: competition._id });
+  let passage: InstanceType<typeof TypingPassage>;
+  try {
+    passage = await TypingPassage.create({ ...body, competitionId: competition._id });
+  } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      throw new AppError(409, "passage_title_taken", "A passage with this title already exists in this competition.");
+    }
+    throw error;
+  }
   await writeAudit(request.adminId!, competition.id, "passage.created", undefined, { passageId: passage.id });
   response.status(201).json({ passage: { id: passage.id, title: passage.title, text: passage.text, difficulty: passage.difficulty, active: passage.active } });
 }));
@@ -346,17 +366,40 @@ router.patch("/passages/:passageId", requireAdmin, requireCsrf, asyncHandler(asy
   const body = passageSchema.partial().strict().refine((value) => Object.keys(value).length > 0).parse(request.body);
   await connectToDatabase();
   const competition = await getCurrentCompetition();
-  await rejectActiveAttempts(competition.id);
-  const passage = await TypingPassage.findOneAndUpdate(
-    { _id: passageId, competitionId: competition._id },
-    { $set: body },
-    { returnDocument: "after", runValidators: true },
-  );
+  let passage: InstanceType<typeof TypingPassage> | null;
+  try {
+    passage = await TypingPassage.findOneAndUpdate(
+      { _id: passageId, competitionId: competition._id },
+      { $set: body },
+      { returnDocument: "after", runValidators: true },
+    );
+  } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      throw new AppError(409, "passage_title_taken", "A passage with this title already exists in this competition.");
+    }
+    throw error;
+  }
   if (!passage) {
     throw new AppError(404, "passage_not_found", "The passage was not found.");
   }
   await writeAudit(request.adminId!, competition.id, "passage.updated", undefined, { passageId });
   response.json({ passage: { id: passage.id, title: passage.title, text: passage.text, difficulty: passage.difficulty, active: passage.active } });
+}));
+
+router.delete("/passages/:passageId", requireAdmin, requireCsrf, asyncHandler(async (request, response) => {
+  const passageId = z.string().regex(/^[a-f\d]{24}$/i).parse(request.params.passageId);
+  await connectToDatabase();
+  const competition = await getCurrentCompetition();
+  const passage = await TypingPassage.findOne({ _id: passageId, competitionId: competition._id });
+  if (!passage) {
+    throw new AppError(404, "passage_not_found", "The passage was not found.");
+  }
+  if (await TypingAttempt.exists({ competitionId: competition._id, passageId: passage._id })) {
+    throw new AppError(409, "passage_in_use", "This passage is attached to an attempt and cannot be deleted. Deactivate it instead.");
+  }
+  await passage.deleteOne();
+  await writeAudit(request.adminId!, competition.id, "passage.deleted", undefined, { passageId });
+  response.status(204).end();
 }));
 
 router.get("/audit-logs", requireAdmin, asyncHandler(async (request, response) => {

@@ -1,4 +1,4 @@
-import { ArrowDownToLine, ArrowRight, CircleAlert, ClipboardList, LogOut, Plus, RefreshCw, Settings2, ShieldCheck, Users } from "lucide-react";
+import { ArrowDownToLine, ArrowRight, CircleAlert, ClipboardList, LogOut, Pencil, Plus, RefreshCw, Settings2, ShieldCheck, Trash2, Users, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { StatusPill } from "../components/StatusPill.js";
 import { ApiError, apiRequest, jsonBody } from "../lib/api.js";
@@ -102,6 +102,7 @@ function AdminDashboard({ admin, csrfToken, onCsrfToken, onLogout, onError, glob
   const [searchText, setSearchText] = useState("");
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [editingPassageId, setEditingPassageId] = useState<string | null>(null);
 
   const authorizedRequest = useCallback(<T,>(path: string, init: RequestInit = {}) =>
     adminRequest<T>(path, init, csrfToken, onCsrfToken), [csrfToken, onCsrfToken]);
@@ -135,17 +136,19 @@ function AdminDashboard({ admin, csrfToken, onCsrfToken, onLogout, onError, glob
     return () => clearTimeout(timer);
   }, [searchText]);
 
-  async function mutate(path: string, method = "POST", body?: unknown) {
+  async function mutate(path: string, method = "POST", body?: unknown): Promise<boolean> {
     setBusy(true);
     setLocalError(null);
     onError(null);
     try {
       await authorizedRequest(path, { method, ...(body === undefined ? {} : { body: jsonBody(body) }) });
       await refresh();
+      return true;
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "The organizer action failed.";
       setLocalError(message);
       onError(message);
+      return false;
     } finally { setBusy(false); }
   }
 
@@ -199,14 +202,31 @@ function AdminDashboard({ admin, csrfToken, onCsrfToken, onLogout, onError, glob
 
   async function addPassage(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    await mutate("/admin/passages", "POST", {
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const created = await mutate("/admin/passages", "POST", {
       title: String(form.get("title")),
       text: String(form.get("text")),
       difficulty: String(form.get("difficulty")),
       active: true,
     });
-    event.currentTarget.reset();
+    if (created) formElement.reset();
+  }
+
+  async function updatePassage(event: React.FormEvent<HTMLFormElement>, passage: TypingPassageRecord) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const saved = await mutate(`/admin/passages/${encodeURIComponent(passage.id)}`, "PATCH", {
+      title: String(form.get("title")),
+      text: String(form.get("text")),
+      difficulty: String(form.get("difficulty")),
+    });
+    if (saved) setEditingPassageId(null);
+  }
+
+  async function deletePassage(passage: TypingPassageRecord) {
+    if (!window.confirm(`Permanently delete "${passage.title}"? This cannot be undone.`)) return;
+    await mutate(`/admin/passages/${encodeURIComponent(passage.id)}`, "DELETE");
   }
 
   return <main className="admin-dashboard content-width">
@@ -271,7 +291,22 @@ function AdminDashboard({ admin, csrfToken, onCsrfToken, onLogout, onError, glob
 
       <section className="admin-section">
         <div className="admin-section-title"><div><span className="eyebrow">05 / PASSAGES</span><h2>Approved text</h2></div><KeyboardIcon /></div>
-        <div className="passage-list">{passages.map((passage) => <div className="passage-admin-row" key={passage.id}><div><strong>{passage.title}</strong><span>{passage.difficulty} · {passage.active ? "active" : "inactive"} · {passage.text.length} characters</span></div><button className="text-action" disabled={busy} onClick={() => void mutate(`/admin/passages/${passage.id}`, "PATCH", { active: !passage.active })}>{passage.active ? "Deactivate" : "Activate"}</button></div>)}</div>
+        <div className="passage-list">{passages.map((passage) => <div className="passage-admin-item" key={passage.id}>
+          <div className="passage-admin-row">
+            <div><strong>{passage.title}</strong><span>{passage.difficulty} · {passage.active ? "active" : "inactive"} · {passage.text.length} characters · {passage.attemptCount} attempts</span></div>
+            <div className="passage-actions">
+              <button className="text-action" disabled={busy} onClick={() => setEditingPassageId(editingPassageId === passage.id ? null : passage.id)}>{editingPassageId === passage.id ? <><X size={13} />Cancel</> : <><Pencil size={13} />Edit</>}</button>
+              <button className="text-action" disabled={busy} onClick={() => void mutate(`/admin/passages/${encodeURIComponent(passage.id)}`, "PATCH", { active: !passage.active })}>{passage.active ? "Deactivate" : "Activate"}</button>
+              <button className="text-action passage-delete-action" disabled={busy || passage.attemptCount > 0} title={passage.attemptCount > 0 ? "Passages used by attempts cannot be deleted; deactivate instead." : "Delete passage"} onClick={() => void deletePassage(passage)}><Trash2 size={13} />Delete</button>
+            </div>
+          </div>
+          {editingPassageId === passage.id && <form className="passage-form passage-edit-form" onSubmit={(event) => void updatePassage(event, passage)}>
+            <label className="field-label">Passage title<input className="text-input" name="title" minLength={3} maxLength={100} defaultValue={passage.title} required /></label>
+            <label className="field-label">Difficulty<select className="text-input" name="difficulty" defaultValue={passage.difficulty}><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label>
+            <label className="field-label passage-text-field">Passage text <span>300–5,000 characters</span><textarea className="text-input passage-textarea" name="text" minLength={300} maxLength={5000} defaultValue={passage.text} required /></label>
+            <button className="button button-dark" disabled={busy}>Save changes <ArrowRight size={15} /></button>
+          </form>}
+        </div>)}</div>
         <form className="passage-form" onSubmit={(event) => void addPassage(event)}>
           <label className="field-label">Passage title<input className="text-input" name="title" minLength={3} maxLength={100} required /></label>
           <label className="field-label">Difficulty<select className="text-input" name="difficulty"><option value="intermediate">Intermediate</option><option value="beginner">Beginner</option><option value="advanced">Advanced</option></select></label>

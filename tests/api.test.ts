@@ -28,6 +28,12 @@ test("admin API rejects unauthenticated requests", async () => {
   assert.equal(response.body.error?.code, "unauthorized");
 });
 
+test("passage deletion requires administrator authentication", async () => {
+  const response = await dispatch("DELETE", "/api/admin/passages/507f1f77bcf86cd799439011");
+  assert.equal(response.status, 401);
+  assert.equal(response.body.error?.code, "unauthorized");
+});
+
 test("same-origin validation accepts the Vite forwarded host", () => {
   assert.equal(isSameOriginRequest(makeOriginRequest({
     origin: "http://localhost:5173",

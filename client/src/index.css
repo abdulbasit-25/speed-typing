@@ -345,6 +345,10 @@ h1 em, h2 em { font-family: Georgia, "Times New Roman", serif; font-weight: 400;
 .passage-admin-row > div { display: flex; flex-direction: column; gap: 5px; }
 .passage-admin-row strong { font-size: 11px; }
 .passage-admin-row span { color: var(--muted); font: 8px var(--mono); }
+.passage-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.passage-actions .text-action { display: inline-flex; align-items: center; gap: 4px; }
+.passage-delete-action { color: var(--red); }
+.passage-edit-form { margin: 0 10px 14px; padding: 14px; background: rgba(255,255,255,.55); }
 .passage-form { display: grid; grid-template-columns: 1fr .7fr auto; gap: 12px; margin-top: 15px; padding-top: 17px; border-top: 1px solid var(--border); }
 .passage-text-field { grid-column: 1/-1; }
 .passage-textarea { min-height: 110px; resize: vertical; }
@@ -618,6 +622,8 @@ body { line-height: 1.5; }
   .admin-attempt-row { grid-template-columns: 1.3fr .8fr auto; gap: 8px; padding-block: 7px; }
   .admin-attempt-row > span:nth-child(3) { display: none; }
   .admin-attempt-row > div strong { font-size: 9px; }
+  .passage-admin-row { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .passage-actions { gap: 10px; }
   .passage-form { grid-template-columns: 1fr; }
   .passage-text-field { grid-column: auto; }
   .passage-form > .button { grid-column: auto; }
