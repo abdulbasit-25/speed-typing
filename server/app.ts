@@ -1,40 +1,26 @@
 import express, { type ErrorRequestHandler } from "express";
-import { rateLimit } from "express-rate-limit";
 import mongoose from "mongoose";
 import adminRouter from "./routes/admin.js";
 import publicRouter from "./routes/public.js";
 import { AppError } from "./utils/AppError.js";
+import { getHealthPayload } from "./services/health.js";
 
 const app = express();
-const globalApiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 180,
-  standardHeaders: "draft-8",
-  legacyHeaders: false,
-});
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use((_request, response, next) => {
+  response.setHeader("Cache-Control", "no-store");
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("X-Frame-Options", "DENY");
   response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   next();
 });
-app.use("/api", globalApiLimiter);
-app.use(express.json({ limit: "16kb", strict: true }));
+app.use(express.json({ limit: "32kb", strict: true }));
 
 app.get("/api/health", (_request, response) => {
-  response.json({
-    status: "ok",
-    service: "tech-vanguard-speed-typing",
-    database: {
-      configured: Boolean(process.env.MONGODB_URI),
-      connection: mongoose.connection.readyState === 1 ? "connected" : "not_connected",
-    },
-    timestamp: new Date().toISOString(),
-  });
+  response.json(getHealthPayload(Boolean(process.env.MONGODB_URI), mongoose.connection.readyState));
 });
 
 app.use("/api", publicRouter);
@@ -59,6 +45,10 @@ app.use(((error: unknown, _request, response, _next) => {
   }
   if (error instanceof mongoose.Error.CastError) {
     response.status(400).json({ error: { code: "invalid_identifier", message: "A supplied identifier is invalid." } });
+    return;
+  }
+  if (error instanceof mongoose.Error.VersionError) {
+    response.status(409).json({ error: { code: "concurrent_update", message: "Competition data changed while this action was being saved. Refresh and try again." } });
     return;
   }
   if (isDuplicateKeyError(error)) {
