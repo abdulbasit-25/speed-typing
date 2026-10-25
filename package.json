@@ -1,16 +1,18 @@
 {
-  "name": "tech-vanguard-speed-typing",
+  "name": "rapidstrike",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web \"npm:dev:server\" \"npm:dev:client\"",
-    "dev:server": "tsx watch api/dev.ts",
+    "dev:server": "tsx watch scripts/dev-api.ts",
     "dev:client": "vite --config vite.config.ts",
     "build": "npm run typecheck && vite build --config vite.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test",
-    "admin:create": "tsx scripts/create-admin.ts"
+    "seed": "tsx scripts/seed.ts",
+    "admin:create": "tsx scripts/create-admin.ts",
+    "admin:delete": "tsx scripts/delete-admin.ts"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -19,7 +21,6 @@
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.2.4",
     "express": "^5.3.0",
-    "express-rate-limit": "^8.7.1",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.61.0",
     "mongoose": "^9.11.3",
