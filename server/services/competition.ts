@@ -12,7 +12,7 @@ export async function getCurrentCompetition() {
   let competition = await Competition.findOneAndUpdate(
     { isCurrent: true },
     { $setOnInsert: { isCurrent: true } },
-    { new: true, upsert: true, setDefaultsOnInsert: true },
+    { returnDocument: "after", upsert: true, setDefaultsOnInsert: true },
   );
 
   if (!competition) {
