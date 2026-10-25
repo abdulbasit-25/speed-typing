@@ -5,10 +5,21 @@ import { connectToDatabase } from "../config/database.js";
 import { getSessionSecret, isProduction } from "../config/env.js";
 import { AppError } from "../utils/AppError.js";
 import { getCookie } from "../utils/security.js";
+import { isSameOriginRequest } from "../utils/requestOrigin.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
 export const sessionCookieName = "tv_admin_session";
 export const csrfCookieName = "tv_admin_csrf";
+
+export function setCsrfCookie(response: import("express").Response, csrf: string): void {
+  response.cookie(csrfCookieName, csrf, {
+    secure: isProduction(),
+    sameSite: "strict",
+    path: "/",
+    httpOnly: false,
+    maxAge: 8 * 60 * 60 * 1000,
+  });
+}
 
 export const requireAdmin: RequestHandler = asyncHandler(async (request, _response, next) => {
   const session = getCookie(request, sessionCookieName);
@@ -49,16 +60,9 @@ export const requireCsrf: RequestHandler = (request, _response, next) => {
   }
 
   const origin = request.get("origin");
-  if (origin) {
-    try {
-      if (new URL(origin).host !== request.get("host")) {
-        next(new AppError(403, "origin_mismatch", "Requests must come from this application."));
-        return;
-      }
-    } catch {
-      next(new AppError(403, "origin_mismatch", "The request origin is invalid."));
-      return;
-    }
+  if (origin && !isSameOriginRequest(request)) {
+    next(new AppError(403, "origin_mismatch", "Requests must come from this application."));
+    return;
   }
   next();
 };
@@ -74,11 +78,7 @@ export function setAdminCookies(response: import("express").Response, session: s
     httpOnly: true,
     maxAge: 8 * 60 * 60 * 1000,
   });
-  response.cookie(csrfCookieName, csrf, {
-    ...common,
-    httpOnly: false,
-    maxAge: 8 * 60 * 60 * 1000,
-  });
+  setCsrfCookie(response, csrf);
 }
 
 export function clearAdminCookies(response: import("express").Response): void {
