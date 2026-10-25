@@ -12,7 +12,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "types": ["node"]
+    "types": ["node", "vite/client"]
   },
   "include": ["api/**/*.ts", "server/**/*.ts", "scripts/**/*.ts", "shared/**/*.ts", "tests/**/*.ts", "vite.config.ts", "client/src/**/*.ts", "client/src/**/*.tsx"],
   "exclude": ["node_modules", "dist", ".vercel"]
