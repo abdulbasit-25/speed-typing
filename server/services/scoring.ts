@@ -8,6 +8,7 @@ export interface ScoreResult {
   accuracy: number;
   finalScore: number;
 }
+export type ScoringMetric = "netWpm" | "grossWpm";
 
 export function calculateScore(referenceText: string, typedText: string, elapsedSeconds: number): ScoreResult {
   const reference = Array.from(referenceText);
@@ -42,4 +43,8 @@ function roundMetric(value: number): number {
 export function normalizeUsername(value: string): { username: string; normalized: string } {
   const username = value.trim();
   return { username, normalized: username.toLocaleLowerCase("en-US") };
+}
+
+export function selectPrimaryScore(score: ScoreResult, metric: ScoringMetric): number {
+  return metric === "grossWpm" ? score.grossWpm : score.netWpm;
 }
