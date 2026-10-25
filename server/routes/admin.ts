@@ -97,35 +97,14 @@ router.get("/me", requireAdmin, asyncHandler(async (request, response) => {
 router.get("/competition", requireAdmin, asyncHandler(async (_request, response) => {
   await connectToDatabase();
   const competition = await getCurrentCompetition();
-  const hasAttempts = Boolean(await TypingAttempt.exists({ competitionId: competition._id }));
-  response.json({
-    competition: {
-      ...publicCompetition(competition),
-      registrationRulesEditable: !hasAttempts && ["upcoming", "registration_open"].includes(competition.status),
-    },
-  });
+  response.json({ competition: publicCompetition(competition) });
 }));
 
 router.patch("/competition", requireAdmin, requireCsrf, asyncHandler(async (request, response) => {
   const changes = settingsSchema.parse(request.body);
   await connectToDatabase();
   const competition = await getCurrentCompetition();
-  await rejectActiveAttempts(competition.id);
-  const changesRegistrationRules =
-    changes.durationSeconds !== undefined && changes.durationSeconds !== competition.durationSeconds ||
-    changes.maxAttempts !== undefined && changes.maxAttempts !== competition.maxAttempts ||
-    changes.scoringMetric !== undefined && changes.scoringMetric !== competition.scoringMetric ||
-    changes.displayNamesEnabled !== undefined && changes.displayNamesEnabled !== competition.displayNamesEnabled ||
-    changes.accessCodeEnabled !== undefined && changes.accessCodeEnabled !== competition.accessCodeEnabled ||
-    changes.accessCode !== undefined;
-  if (changesRegistrationRules) {
-    if (!["upcoming", "registration_open"].includes(competition.status)) {
-      throw new AppError(409, "registration_rules_locked", "Registration rules can only be changed before the competition starts.");
-    }
-    if (await TypingAttempt.exists({ competitionId: competition._id })) {
-      throw new AppError(409, "rules_locked", "Registration rules are locked after the first attempt begins.");
-    }
-  }
+  const changesScoringMetric = changes.scoringMetric !== undefined && changes.scoringMetric !== competition.scoringMetric;
 
   const update: Record<string, unknown> = { ...changes };
   delete update.accessCode;
@@ -149,6 +128,23 @@ router.patch("/competition", requireAdmin, requireCsrf, asyncHandler(async (requ
     throw new AppError(400, "access_code_required", "An access code must be set while access-code protection is enabled.");
   }
   await competition.save();
+  if (changesScoringMetric && changes.scoringMetric) {
+    await TypingAttempt.collection.updateMany(
+      { competitionId: competition._id },
+      [{
+        $set: {
+          scoringMetric: changes.scoringMetric,
+          finalScore: {
+            $cond: [
+              { $eq: ["$status", "submitted"] },
+              { $ifNull: [`$${changes.scoringMetric}`, 0] },
+              "$$REMOVE",
+            ],
+          },
+        },
+      }],
+    );
+  }
   await writeAudit(request.adminId!, competition.id, "competition.settings_updated", undefined, Object.keys(changes));
   response.json({ competition: publicCompetition(competition) });
 }));
