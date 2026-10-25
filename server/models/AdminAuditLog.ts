@@ -1,4 +1,5 @@
-import { Schema, model, models } from "mongoose";
+import mongoose from "mongoose";
+const { Schema } = mongoose;
 
 const adminAuditLogSchema = new Schema(
   {
@@ -12,5 +13,6 @@ const adminAuditLogSchema = new Schema(
 );
 
 adminAuditLogSchema.index({ competitionId: 1, createdAt: -1 });
+adminAuditLogSchema.index({ createdAt: -1 });
 
-export const AdminAuditLog = models.AdminAuditLog ?? model("AdminAuditLog", adminAuditLogSchema);
+export const AdminAuditLog = mongoose.models.AdminAuditLog ?? mongoose.model("AdminAuditLog", adminAuditLogSchema);
