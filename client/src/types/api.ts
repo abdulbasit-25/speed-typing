@@ -7,6 +7,7 @@ export interface Competition {
   status: CompetitionStatus;
   durationSeconds: number;
   maxAttempts: number;
+  scoringMetric: "netWpm" | "grossWpm";
   displayNamesEnabled: boolean;
   accessCodeEnabled: boolean;
   projectorTopN: number;
@@ -28,7 +29,7 @@ export interface LeaderboardRow {
 }
 
 export interface LeaderboardResponse {
-  competition: Pick<Competition, "name" | "institution" | "status" | "durationSeconds" | "projectorTopN" | "hideSecondaryStats">;
+  competition: Pick<Competition, "name" | "institution" | "status" | "durationSeconds" | "scoringMetric" | "projectorTopN" | "hideSecondaryStats">;
   participantCount: number;
   submittedCount: number;
   updatedAt: string;
@@ -45,6 +46,7 @@ export interface TypingAttempt {
 
 export interface TypingResult {
   attemptId: string;
+  scoringMetric: "netWpm" | "grossWpm";
   elapsedSeconds: number;
   typedCharacters: number;
   correctCharacters: number;
@@ -77,7 +79,7 @@ export interface ParticipantRecord {
 export interface AttemptRecord {
   id: string;
   participant: { id: string; username: string; displayName: string | null } | null;
-  status: "started" | "submitted" | "invalidated";
+  status: "started" | "submitted" | "invalidated" | "expired";
   grossWpm: number | null;
   netWpm: number | null;
   accuracy: number | null;
@@ -95,4 +97,14 @@ export interface TypingPassageRecord {
   difficulty: "beginner" | "intermediate" | "advanced";
   active: boolean;
   createdAt?: string;
+}
+
+export interface AdminAuditRecord {
+  id: string;
+  adminEmail: string;
+  competitionName: string;
+  action: string;
+  reason: string | null;
+  metadata: unknown;
+  createdAt: string;
 }
