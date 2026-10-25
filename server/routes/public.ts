@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
-import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
@@ -10,15 +9,17 @@ import { Participant } from "../models/Participant.js";
 import { TypingAttempt } from "../models/TypingAttempt.js";
 import { TypingPassage } from "../models/TypingPassage.js";
 import { getCurrentCompetition, isDuplicateKeyError } from "../services/competition.js";
-import { calculateScore, normalizeUsername } from "../services/scoring.js";
+import { calculateScore, normalizeUsername, selectPrimaryScore } from "../services/scoring.js";
+import { getBestAttempts, getParticipantRank } from "../services/ranking.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError } from "../utils/AppError.js";
 import { createParticipantKey, hashSecret, secretsMatch } from "../utils/security.js";
+import { persistentRateLimit } from "../middleware/rateLimit.js";
 
 const router = Router();
-const registerLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 12, standardHeaders: "draft-8", legacyHeaders: false });
-const startLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: "draft-8", legacyHeaders: false });
-const submitLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false });
+const registerLimiter = persistentRateLimit("participant-register", 300, 15 * 60 * 1000);
+const startLimiter = persistentRateLimit("attempt-start", 200, 60 * 1000);
+const submitLimiter = persistentRateLimit("attempt-submit", 300, 60 * 1000);
 
 const usernameSchema = z.string().trim().min(3).max(20).regex(/^[A-Za-z0-9_]+$/, "Use 3–20 letters, numbers, or underscores.");
 const objectIdSchema = z.string().regex(/^[a-f\d]{24}$/i, "A valid participant ID is required.");
@@ -47,6 +48,7 @@ router.get("/competition", asyncHandler(async (_request, response) => {
       status: competition.status,
       durationSeconds: competition.durationSeconds,
       maxAttempts: competition.maxAttempts,
+      scoringMetric: competition.scoringMetric,
       displayNamesEnabled: competition.displayNamesEnabled,
       accessCodeEnabled: competition.accessCodeEnabled,
       projectorTopN: competition.projectorTopN,
@@ -112,20 +114,17 @@ router.post("/attempts/current", asyncHandler(async (request, response) => {
     competitionId: participant.competitionId,
     participantId: participant._id,
     status: "started",
-  }).sort({ startedAt: -1 });
+  }).select("+passageText").sort({ startedAt: -1 });
   if (active) {
-    const passage = await TypingPassage.findById(active.passageId).select("title text");
-    if (!passage) {
-      throw new AppError(503, "passage_unavailable", "The assigned typing passage is unavailable.");
-    }
     response.json({
       attempt: {
         id: active.attemptId,
         startedAt: active.startedAt.toISOString(),
         expiresAt: active.expiresAt.toISOString(),
         durationSeconds: active.durationSeconds,
-        passage: { title: passage.title, text: passage.text },
+        passage: { title: active.passageTitle, text: active.passageText },
       },
+      result: null,
     });
     return;
   }
@@ -139,19 +138,9 @@ router.post("/attempts/current", asyncHandler(async (request, response) => {
     response.json({ attempt: null, result: null });
     return;
   }
-  const rank = await TypingAttempt.countDocuments({
-    competitionId: participant.competitionId,
-    status: "submitted",
-    $or: [
-      { finalScore: { $gt: latest.finalScore } },
-      { finalScore: latest.finalScore, accuracy: { $gt: latest.accuracy } },
-      { finalScore: latest.finalScore, accuracy: latest.accuracy, errorCount: { $lt: latest.errorCount } },
-      { finalScore: latest.finalScore, accuracy: latest.accuracy, errorCount: latest.errorCount, submittedAt: { $lt: latest.submittedAt } },
-    ],
-  }) + 1;
   response.json({
     attempt: null,
-    result: { ...resultResponse(latest), rank },
+    result: { ...resultResponse(latest), rank: await getParticipantRank(latest.competitionId, latest.participantId) },
   });
 }));
 
@@ -177,6 +166,10 @@ router.post("/attempts/start", startLimiter, asyncHandler(async (request, respon
   }
 
   const now = new Date();
+  await TypingAttempt.updateMany(
+    { participantId: participant._id, status: "started", expiresAt: { $lte: now } },
+    { $set: { status: "expired" } },
+  );
   const activeAttempt = await TypingAttempt.exists({
     participantId: participant._id,
     status: "started",
@@ -186,7 +179,12 @@ router.post("/attempts/start", startLimiter, asyncHandler(async (request, respon
     throw new AppError(409, "attempt_in_progress", "An attempt is already in progress.");
   }
 
-  const passage = await TypingPassage.findOne({ competitionId: competition._id, active: true }).sort({ createdAt: 1 });
+  const passages = await TypingPassage.aggregate<{ _id: mongoose.Types.ObjectId; title: string; text: string }>([
+    { $match: { competitionId: competition._id, active: true } },
+    { $sample: { size: 1 } },
+    { $project: { title: 1, text: 1 } },
+  ]);
+  const passage = passages[0];
   if (!passage) {
     throw new AppError(503, "passage_unavailable", "No approved typing passage is available.");
   }
@@ -194,7 +192,7 @@ router.post("/attempts/start", startLimiter, asyncHandler(async (request, respon
   const reservation = await Participant.findOneAndUpdate(
     { _id: participant._id, status: "active", attemptsStarted: { $lt: competition.maxAttempts } },
     { $inc: { attemptsStarted: 1 } },
-    { new: true },
+    { returnDocument: "after" },
   );
   if (!reservation) {
     throw new AppError(409, "attempt_limit_reached", "The allowed number of attempts has been used.");
@@ -212,6 +210,8 @@ router.post("/attempts/start", startLimiter, asyncHandler(async (request, respon
       expiresAt,
       durationSeconds: competition.durationSeconds,
       scoringMetric: competition.scoringMetric,
+      passageTitle: passage.title,
+      passageText: passage.text,
     });
   } catch (error) {
     await Participant.updateOne({ _id: participant._id }, { $inc: { attemptsStarted: -1 } });
@@ -242,7 +242,7 @@ router.post("/attempts/:attemptId/submit", submitLimiter, asyncHandler(async (re
     throw new AppError(403, "participant_auth_failed", "This participant session is invalid.");
   }
 
-  const attempt = await TypingAttempt.findOne({ attemptId, participantId: participant._id }).select("+submissionHash");
+  const attempt = await TypingAttempt.findOne({ attemptId, participantId: participant._id }).select("+submissionHash +passageText");
   if (!attempt) {
     throw new AppError(404, "attempt_not_found", "The attempt was not found.");
   }
@@ -252,27 +252,23 @@ router.post("/attempts/:attemptId/submit", submitLimiter, asyncHandler(async (re
     if (attempt.submissionHash !== submissionHash) {
       throw new AppError(409, "already_submitted", "This attempt has already been submitted.");
     }
-    response.json({ result: resultResponse(attempt), accepted: true, idempotent: true });
+    response.json({ result: { ...resultResponse(attempt), rank: await getParticipantRank(attempt.competitionId, participant._id) }, accepted: true, idempotent: true });
     return;
   }
   if (attempt.status !== "started") {
     throw new AppError(409, "attempt_not_submittable", "This attempt cannot be submitted.");
   }
 
-  const passage = await TypingPassage.findById(attempt.passageId).select("text");
-  if (!passage) {
-    throw new AppError(503, "passage_unavailable", "The assigned typing passage is unavailable.");
-  }
-
   const now = new Date();
   const elapsedMilliseconds = Math.max(0, now.getTime() - attempt.startedAt.getTime());
-  const completedPassage = Array.from(body.text).length >= Array.from(passage.text).length;
+  const completedPassage = Array.from(body.text).length >= Array.from(attempt.passageText).length;
   if (!completedPassage && elapsedMilliseconds < attempt.durationSeconds * 1000 - 1000) {
     throw new AppError(409, "attempt_not_finished", "The typing timer is still running.");
   }
 
   const elapsedSeconds = Math.max(1, Math.min(attempt.durationSeconds, Math.floor(elapsedMilliseconds / 1000)));
-  const score = calculateScore(passage.text, body.text, elapsedSeconds);
+  const score = calculateScore(attempt.passageText, body.text, elapsedSeconds);
+  score.finalScore = selectPrimaryScore(score, attempt.scoringMetric);
   const update = await TypingAttempt.updateOne(
     { _id: attempt._id, status: "started" },
     {
@@ -289,7 +285,7 @@ router.post("/attempts/:attemptId/submit", submitLimiter, asyncHandler(async (re
   if (update.modifiedCount === 0) {
     const existing = await TypingAttempt.findById(attempt._id).select("+submissionHash");
     if (existing?.status === "submitted" && existing.submissionHash === submissionHash) {
-      response.json({ result: resultResponse(existing), accepted: true, idempotent: true });
+      response.json({ result: { ...resultResponse(existing), rank: await getParticipantRank(existing.competitionId, participant._id) }, accepted: true, idempotent: true });
       return;
     }
     throw new AppError(409, "attempt_not_submittable", "This attempt was already processed.");
@@ -299,21 +295,7 @@ router.post("/attempts/:attemptId/submit", submitLimiter, asyncHandler(async (re
   if (!acceptedAttempt) {
     throw new AppError(500, "result_unavailable", "The accepted result could not be loaded.");
   }
-  const rank = await TypingAttempt.countDocuments({
-    competitionId: attempt.competitionId,
-    status: "submitted",
-    $or: [
-      { finalScore: { $gt: acceptedAttempt.finalScore } },
-      { finalScore: acceptedAttempt.finalScore, accuracy: { $gt: acceptedAttempt.accuracy } },
-      { finalScore: acceptedAttempt.finalScore, accuracy: acceptedAttempt.accuracy, errorCount: { $lt: acceptedAttempt.errorCount } },
-      {
-        finalScore: acceptedAttempt.finalScore,
-        accuracy: acceptedAttempt.accuracy,
-        errorCount: acceptedAttempt.errorCount,
-        submittedAt: { $lt: acceptedAttempt.submittedAt },
-      },
-    ],
-  }) + 1;
+  const rank = await getParticipantRank(acceptedAttempt.competitionId, participant._id);
 
   response.status(201).json({ result: { ...resultResponse(acceptedAttempt), rank }, accepted: true, idempotent: false });
 }));
@@ -324,11 +306,7 @@ router.get("/leaderboard", asyncHandler(async (request, response) => {
   const { limit } = leaderboardQuery.parse(request.query);
   await connectToDatabase();
   const competition = await getCurrentCompetition();
-  const attempts = await TypingAttempt.find({ competitionId: competition._id, status: "submitted" })
-    .sort({ finalScore: -1, accuracy: -1, errorCount: 1, submittedAt: 1 })
-    .limit(limit)
-    .populate({ path: "participantId", select: "username displayName" })
-    .lean();
+  const attempts = await getBestAttempts(competition._id, limit);
   const participantCount = await Participant.countDocuments({ competitionId: competition._id, status: "active" });
   const submittedCount = await TypingAttempt.countDocuments({ competitionId: competition._id, status: "submitted" });
 
@@ -338,6 +316,7 @@ router.get("/leaderboard", asyncHandler(async (request, response) => {
       institution: competition.institution,
       status: competition.status,
       durationSeconds: competition.durationSeconds,
+      scoringMetric: competition.scoringMetric,
       projectorTopN: competition.projectorTopN,
       hideSecondaryStats: competition.hideSecondaryStats,
     },
@@ -345,11 +324,10 @@ router.get("/leaderboard", asyncHandler(async (request, response) => {
     submittedCount,
     updatedAt: new Date().toISOString(),
     results: attempts.map((attempt, index) => {
-      const participant = attempt.participantId as unknown as { username: string; displayName?: string } | null;
       return {
         rank: index + 1,
-        username: participant?.username ?? "Participant",
-        displayName: participant?.displayName ?? null,
+        username: attempt.username,
+        displayName: attempt.displayName,
         grossWpm: attempt.grossWpm ?? 0,
         netWpm: attempt.netWpm ?? 0,
         accuracy: attempt.accuracy ?? 0,
@@ -371,6 +349,7 @@ router.get("/leaderboard/summary", asyncHandler(async (_request, response) => {
 
 function resultResponse(attempt: {
   attemptId: string;
+  scoringMetric: "netWpm" | "grossWpm";
   elapsedSeconds?: number;
   typedCharacters?: number;
   correctCharacters?: number;
@@ -384,6 +363,7 @@ function resultResponse(attempt: {
 }) {
   return {
     attemptId: attempt.attemptId,
+    scoringMetric: attempt.scoringMetric,
     elapsedSeconds: attempt.elapsedSeconds ?? 0,
     typedCharacters: attempt.typedCharacters ?? 0,
     correctCharacters: attempt.correctCharacters ?? 0,
@@ -396,5 +376,6 @@ function resultResponse(attempt: {
     submittedAt: attempt.submittedAt?.toISOString() ?? null,
   };
 }
+
 
 export default router;
