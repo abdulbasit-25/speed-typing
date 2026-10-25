@@ -1,4 +1,5 @@
-import { Schema, model, models } from "mongoose";
+import mongoose from "mongoose";
+const { Schema } = mongoose;
 
 const typingPassageSchema = new Schema(
   {
@@ -14,4 +15,4 @@ const typingPassageSchema = new Schema(
 typingPassageSchema.index({ competitionId: 1, active: 1 });
 typingPassageSchema.index({ competitionId: 1, title: 1 }, { unique: true });
 
-export const TypingPassage = models.TypingPassage ?? model("TypingPassage", typingPassageSchema);
+export const TypingPassage = mongoose.models.TypingPassage ?? mongoose.model("TypingPassage", typingPassageSchema);
