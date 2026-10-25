@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { Router } from "express";
-import { rateLimit } from "express-rate-limit";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
@@ -14,13 +13,16 @@ import { Participant } from "../models/Participant.js";
 import { TypingAttempt } from "../models/TypingAttempt.js";
 import { TypingPassage } from "../models/TypingPassage.js";
 import { getCurrentCompetition } from "../services/competition.js";
+import { getBestAttempts } from "../services/ranking.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError } from "../utils/AppError.js";
-import { clearAdminCookies, csrfCookieName, requireAdmin, requireCsrf, setAdminCookies } from "../middleware/auth.js";
+import { clearAdminCookies, csrfCookieName, requireAdmin, requireCsrf, setAdminCookies, setCsrfCookie } from "../middleware/auth.js";
 import { getCookie } from "../utils/security.js";
+import { isSameOriginRequest } from "../utils/requestOrigin.js";
+import { persistentRateLimit } from "../middleware/rateLimit.js";
 
 const router = Router();
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 8, standardHeaders: "draft-8", legacyHeaders: false });
+const loginLimiter = persistentRateLimit("admin-login", 8, 15 * 60 * 1000);
 const adminListQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
@@ -29,11 +31,12 @@ const adminListQuery = z.object({
 });
 const loginSchema = z.object({
   email: z.string().trim().email().max(254),
-  password: z.string().min(1).max(200),
+  password: z.string().min(1).refine((value) => Buffer.byteLength(value, "utf8") <= 72, "Password cannot exceed bcrypt's 72-byte limit."),
 }).strict();
 const settingsSchema = z.object({
   durationSeconds: z.number().int().min(15).max(300).optional(),
   maxAttempts: z.number().int().min(1).max(5).optional(),
+  scoringMetric: z.enum(["netWpm", "grossWpm"]).optional(),
   displayNamesEnabled: z.boolean().optional(),
   accessCodeEnabled: z.boolean().optional(),
   accessCode: z.string().trim().min(4).max(64).nullable().optional(),
@@ -41,7 +44,7 @@ const settingsSchema = z.object({
   hideSecondaryStats: z.boolean().optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, "At least one setting must be provided.");
 
-router.post("/login", loginLimiter, requireSameOrigin, asyncHandler(async (request, response) => {
+router.post("/login", requireSameOrigin, loginLimiter, asyncHandler(async (request, response) => {
   const body = loginSchema.parse(request.body);
   await connectToDatabase();
   const admin = await Admin.findOne({ email: body.email.toLowerCase(), active: true }).select("+passwordHash");
@@ -68,22 +71,39 @@ router.post("/logout", requireAdmin, requireCsrf, (_request, response) => {
   response.status(204).end();
 });
 
+router.post("/csrf", requireAdmin, requireSameOrigin, (_request, response) => {
+  const csrfToken = randomBytes(32).toString("base64url");
+  setCsrfCookie(response, csrfToken);
+  response.json({ csrfToken });
+});
+
 router.get("/me", requireAdmin, asyncHandler(async (request, response) => {
   await connectToDatabase();
   const admin = await Admin.findOne({ _id: request.adminId, active: true }).select("email role");
   if (!admin) {
     throw new AppError(401, "unauthorized", "Administrator account is not active.");
   }
+  let csrfToken = getCookie(request, csrfCookieName);
+  if (!csrfToken || csrfToken.length < 32) {
+    csrfToken = randomBytes(32).toString("base64url");
+    setCsrfCookie(response, csrfToken);
+  }
   response.json({
     admin: { id: admin.id, email: admin.email, role: admin.role },
-    csrfToken: getCookie(request, csrfCookieName) ?? null,
+    csrfToken,
   });
 }));
 
 router.get("/competition", requireAdmin, asyncHandler(async (_request, response) => {
   await connectToDatabase();
   const competition = await getCurrentCompetition();
-  response.json({ competition: competition.toJSON() });
+  const hasAttempts = Boolean(await TypingAttempt.exists({ competitionId: competition._id }));
+  response.json({
+    competition: {
+      ...publicCompetition(competition),
+      registrationRulesEditable: !hasAttempts && ["upcoming", "registration_open"].includes(competition.status),
+    },
+  });
 }));
 
 router.patch("/competition", requireAdmin, requireCsrf, asyncHandler(async (request, response) => {
@@ -91,10 +111,28 @@ router.patch("/competition", requireAdmin, requireCsrf, asyncHandler(async (requ
   await connectToDatabase();
   const competition = await getCurrentCompetition();
   await rejectActiveAttempts(competition.id);
+  const changesRegistrationRules =
+    changes.durationSeconds !== undefined && changes.durationSeconds !== competition.durationSeconds ||
+    changes.maxAttempts !== undefined && changes.maxAttempts !== competition.maxAttempts ||
+    changes.scoringMetric !== undefined && changes.scoringMetric !== competition.scoringMetric ||
+    changes.displayNamesEnabled !== undefined && changes.displayNamesEnabled !== competition.displayNamesEnabled ||
+    changes.accessCodeEnabled !== undefined && changes.accessCodeEnabled !== competition.accessCodeEnabled ||
+    changes.accessCode !== undefined;
+  if (changesRegistrationRules) {
+    if (!["upcoming", "registration_open"].includes(competition.status)) {
+      throw new AppError(409, "registration_rules_locked", "Registration rules can only be changed before the competition starts.");
+    }
+    if (await TypingAttempt.exists({ competitionId: competition._id })) {
+      throw new AppError(409, "rules_locked", "Registration rules are locked after the first attempt begins.");
+    }
+  }
 
   const update: Record<string, unknown> = { ...changes };
   delete update.accessCode;
   if (changes.accessCode === null) {
+    if (changes.accessCodeEnabled !== false) {
+      throw new AppError(400, "access_code_required", "Disable access-code protection before clearing its code.");
+    }
     update.accessCodeHash = undefined;
   } else if (changes.accessCode !== undefined) {
     update.accessCodeHash = await bcrypt.hash(changes.accessCode, 12);
@@ -204,10 +242,14 @@ router.post("/competition/reset", requireAdmin, requireCsrf, asyncHandler(async 
 }));
 
 router.get("/participants", requireAdmin, asyncHandler(async (request, response) => {
-  const { page, limit, search } = adminListQuery.parse(request.query);
+  const { page, limit, search, status } = adminListQuery.parse(request.query);
   await connectToDatabase();
   const competition = await getCurrentCompetition();
   const query: Record<string, unknown> = { competitionId: competition._id };
+  if (status && !["active", "blocked"].includes(status)) {
+    throw new AppError(400, "invalid_participant_status", "Participant status must be active or blocked.");
+  }
+  if (status) query.status = status;
   if (search) {
     const escaped = escapeRegex(search);
     query.$or = [{ username: new RegExp(escaped, "i") }, { displayName: new RegExp(escaped, "i") }];
@@ -234,9 +276,10 @@ router.get("/attempts", requireAdmin, asyncHandler(async (request, response) => 
   await connectToDatabase();
   const competition = await getCurrentCompetition();
   const query: Record<string, unknown> = { competitionId: competition._id };
-  if (status && ["started", "submitted", "invalidated"].includes(status)) {
-    query.status = status;
+  if (status && !["started", "submitted", "invalidated", "expired"].includes(status)) {
+    throw new AppError(400, "invalid_attempt_status", "Attempt status must be started, submitted, invalidated, or expired.");
   }
+  if (status) query.status = status;
   let participantIds: unknown[] | undefined;
   if (search) {
     const matching = await Participant.find({ competitionId: competition._id, username: new RegExp(escapeRegex(search), "i") }).select("_id").lean();
@@ -276,7 +319,7 @@ router.patch("/attempts/:attemptId/invalidate", requireAdmin, requireCsrf, async
   const attempt = await TypingAttempt.findOneAndUpdate(
     { attemptId, competitionId: competition._id, status: "submitted" },
     { $set: { status: "invalidated", invalidReason: reason, invalidatedBy: request.adminId } },
-    { new: true },
+    { returnDocument: "after" },
   );
   if (!attempt) {
     throw new AppError(404, "submitted_attempt_not_found", "A submitted attempt with this ID was not found.");
@@ -311,7 +354,7 @@ router.patch("/passages/:passageId", requireAdmin, requireCsrf, asyncHandler(asy
   const passage = await TypingPassage.findOneAndUpdate(
     { _id: passageId, competitionId: competition._id },
     { $set: body },
-    { new: true, runValidators: true },
+    { returnDocument: "after", runValidators: true },
   );
   if (!passage) {
     throw new AppError(404, "passage_not_found", "The passage was not found.");
@@ -323,16 +366,16 @@ router.patch("/passages/:passageId", requireAdmin, requireCsrf, asyncHandler(asy
 router.get("/audit-logs", requireAdmin, asyncHandler(async (request, response) => {
   const { page, limit } = adminListQuery.parse(request.query);
   await connectToDatabase();
-  const competition = await getCurrentCompetition();
   const [logs, total] = await Promise.all([
-    AdminAuditLog.find({ competitionId: competition._id }).populate({ path: "adminId", select: "email" }).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
-    AdminAuditLog.countDocuments({ competitionId: competition._id }),
+    AdminAuditLog.find({}).populate({ path: "adminId", select: "email" }).populate({ path: "competitionId", select: "name" }).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    AdminAuditLog.countDocuments({}),
   ]);
   response.json({
     page, limit, total,
     logs: logs.map((log) => {
       const admin = log.adminId as unknown as { email: string } | null;
-      return { id: log._id.toString(), adminEmail: admin?.email ?? "Unknown", action: log.action, reason: log.reason ?? null, metadata: log.metadata, createdAt: log.createdAt.toISOString() };
+      const competition = log.competitionId as unknown as { name: string } | null;
+      return { id: log._id.toString(), adminEmail: admin?.email ?? "Unknown", competitionName: competition?.name ?? "Archived competition", action: log.action, reason: log.reason ?? null, metadata: log.metadata, createdAt: log.createdAt.toISOString() };
     }),
   });
 }));
@@ -340,15 +383,11 @@ router.get("/audit-logs", requireAdmin, asyncHandler(async (request, response) =
 router.get("/results/export", requireAdmin, asyncHandler(async (_request, response) => {
   await connectToDatabase();
   const competition = await getCurrentCompetition();
-  const attempts = await TypingAttempt.find({ competitionId: competition._id, status: "submitted" })
-    .populate({ path: "participantId", select: "username displayName" })
-    .sort({ finalScore: -1, accuracy: -1, errorCount: 1, submittedAt: 1 })
-    .lean();
+  const attempts = await getBestAttempts(competition._id);
   const rows = [
     ["rank", "username", "display_name", "net_wpm", "gross_wpm", "accuracy", "errors", "elapsed_seconds", "submitted_at"],
     ...attempts.map((attempt, index) => {
-      const participant = attempt.participantId as unknown as { username: string; displayName?: string } | null;
-      return [index + 1, participant?.username ?? "", participant?.displayName ?? "", attempt.netWpm ?? 0, attempt.grossWpm ?? 0, attempt.accuracy ?? 0, attempt.errorCount ?? 0, attempt.elapsedSeconds ?? 0, attempt.submittedAt?.toISOString() ?? ""];
+      return [index + 1, attempt.username, attempt.displayName ?? "", attempt.netWpm, attempt.grossWpm, attempt.accuracy, attempt.errorCount, attempt.elapsedSeconds, attempt.submittedAt.toISOString()];
     }),
   ];
   response.type("text/csv").attachment("tech-vanguard-results.csv").send(rows.map((row) => row.map(csvCell).join(",")).join("\r\n"));
@@ -427,14 +466,8 @@ function publicCompetition(competition: InstanceType<typeof Competition>) {
 }
 
 function requireSameOrigin(request: import("express").Request, _response: import("express").Response, next: import("express").NextFunction): void {
-  const origin = request.get("origin");
-  try {
-    if (!origin || new URL(origin).host !== request.get("host")) {
-      next(new AppError(403, "origin_mismatch", "Sign-in requests must come from this application."));
-      return;
-    }
-  } catch {
-    next(new AppError(403, "origin_mismatch", "The request origin is invalid."));
+  if (!isSameOriginRequest(request)) {
+    next(new AppError(403, "origin_mismatch", "Sign-in requests must come from this application."));
     return;
   }
   next();
