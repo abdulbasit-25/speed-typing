@@ -1,4 +1,5 @@
-import { Schema, model, models } from "mongoose";
+import mongoose from "mongoose";
+const { Schema } = mongoose;
 
 const participantSchema = new Schema(
   {
@@ -15,4 +16,4 @@ const participantSchema = new Schema(
 
 participantSchema.index({ competitionId: 1, usernameNormalized: 1 }, { unique: true });
 
-export const Participant = models.Participant ?? model("Participant", participantSchema);
+export const Participant = mongoose.models.Participant ?? mongoose.model("Participant", participantSchema);
