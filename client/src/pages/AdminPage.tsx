@@ -6,7 +6,7 @@ import { adminFetch, adminRequest } from "../lib/adminApi.js";
 import type { AdminAuditRecord, AttemptRecord, Competition, ParticipantRecord, TypingPassageRecord } from "../types/api.js";
 
 interface AdminIdentity { id: string; email: string; role: string }
-type AdminSettings = Competition & { registrationRulesEditable: boolean };
+type AdminSettings = Competition;
 interface PageRecords<T> { participants?: T[]; attempts?: T[]; total: number }
 
 export function AdminPage() {
@@ -155,23 +155,17 @@ function AdminDashboard({ admin, csrfToken, onCsrfToken, onLogout, onError, glob
     const form = new FormData(event.currentTarget);
     const accessCode = String(form.get("accessCode") ?? "").trim();
     const body: Record<string, unknown> = {
+      durationSeconds: Number(form.get("durationSeconds")),
+      maxAttempts: Number(form.get("maxAttempts")),
+      scoringMetric: String(form.get("scoringMetric")),
+      displayNamesEnabled: form.get("displayNamesEnabled") === "on",
+      accessCodeEnabled: form.get("accessCodeEnabled") === "on",
       projectorTopN: Number(form.get("projectorTopN")),
       hideSecondaryStats: form.get("hideSecondaryStats") === "on",
+      ...(accessCode ? { accessCode } : {}),
     };
-    if (registrationRulesEditable) {
-      Object.assign(body, {
-        durationSeconds: Number(form.get("durationSeconds")),
-        maxAttempts: Number(form.get("maxAttempts")),
-        scoringMetric: String(form.get("scoringMetric")),
-        displayNamesEnabled: form.get("displayNamesEnabled") === "on",
-        accessCodeEnabled: form.get("accessCodeEnabled") === "on",
-        ...(accessCode ? { accessCode } : {}),
-      });
-    }
     await mutate("/admin/competition", "PATCH", body);
   }
-
-  const registrationRulesEditable = competition?.registrationRulesEditable ?? false;
 
   async function invalidate(attemptId: string) {
     const reason = window.prompt("Reason for invalidating this result (at least 8 characters):");
@@ -239,21 +233,17 @@ function AdminDashboard({ admin, csrfToken, onCsrfToken, onLogout, onError, glob
       <section className="admin-section">
         <div className="admin-section-title"><div><span className="eyebrow">02 / CONFIGURATION</span><h2>Competition rules</h2></div><Settings2 size={18} /></div>
         <form className="admin-settings-form" key={`${competition.id}-${competition.status}-${competition.durationSeconds}-${competition.maxAttempts}-${competition.scoringMetric}-${competition.projectorTopN}-${competition.hideSecondaryStats}-${competition.displayNamesEnabled}-${competition.accessCodeEnabled}`} onSubmit={(event) => void saveSettings(event)}>
-          <label className="field-label">Duration <span>seconds · 15–300</span><input className="text-input" name="durationSeconds" type="number" min="15" max="300" defaultValue={competition.durationSeconds} disabled={!registrationRulesEditable} required /></label>
-          <label className="field-label">Attempts per participant <span>1–5</span><input className="text-input" name="maxAttempts" type="number" min="1" max="5" defaultValue={competition.maxAttempts} disabled={!registrationRulesEditable} required /></label>
+          <label className="field-label">Duration <span>seconds · 15–300</span><input className="text-input" name="durationSeconds" type="number" min="15" max="300" defaultValue={competition.durationSeconds} required /></label>
+          <label className="field-label">Attempts per participant <span>1–5</span><input className="text-input" name="maxAttempts" type="number" min="1" max="5" defaultValue={competition.maxAttempts} required /></label>
           <label className="field-label">Projector rows <span>3–20</span><input className="text-input" name="projectorTopN" type="number" min="3" max="20" defaultValue={competition.projectorTopN} required /></label>
-          <label className="field-label">Access code <span>Leave blank to keep the current code</span><input className="text-input" name="accessCode" type="password" minLength={4} maxLength={64} autoComplete="new-password" disabled={!registrationRulesEditable} /></label>
-          <label className="field-label">Ranking score <span>Locked after the first attempt starts</span><select className="text-input" name="scoringMetric" defaultValue={competition.scoringMetric} disabled={!registrationRulesEditable}><option value="netWpm">Net WPM</option><option value="grossWpm">Gross WPM</option></select></label>
+          <label className="field-label">Access code <span>Leave blank to keep the current code</span><input className="text-input" name="accessCode" type="password" minLength={4} maxLength={64} autoComplete="new-password" /></label>
+          <label className="field-label">Ranking score <span>Changing this re-ranks all results</span><select className="text-input" name="scoringMetric" defaultValue={competition.scoringMetric}><option value="netWpm">Net WPM</option><option value="grossWpm">Gross WPM</option></select></label>
           <div className="toggle-list">
-            <Toggle name="displayNamesEnabled" label="Allow optional display names" checked={competition.displayNamesEnabled} disabled={!registrationRulesEditable} />
-            <Toggle name="accessCodeEnabled" label="Require an access code" checked={competition.accessCodeEnabled} disabled={!registrationRulesEditable} />
+            <Toggle name="displayNamesEnabled" label="Allow optional display names" checked={competition.displayNamesEnabled} />
+            <Toggle name="accessCodeEnabled" label="Require an access code" checked={competition.accessCodeEnabled} />
             <Toggle name="hideSecondaryStats" label="Hide secondary leaderboard stats" checked={competition.hideSecondaryStats} />
           </div>
-          <p className="settings-note">{registrationRulesEditable
-            ? competition.status === "registration_open"
-              ? "Registration is open. You can still update these rules until the first attempt starts; changes apply to participants who start after saving."
-              : "Competition rules can be changed until the first attempt starts, including while registration is open. Projector preferences remain adjustable throughout the round."
-            : "Competition rules are locked because the round has started or an attempt is already recorded. Projector preferences remain adjustable. All metrics are calculated by the server."}</p>
+          <p className="settings-note">These settings can be saved throughout the round. Duration and attempt-limit changes apply to future attempts; active attempts keep their original timing. Changing the ranking score re-ranks existing results and applies to future submissions. All metrics are calculated by the server.</p>
           <button className="button button-dark" disabled={busy}>Save rules <ArrowRight size={15} /></button>
         </form>
       </section>
