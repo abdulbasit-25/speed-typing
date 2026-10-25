@@ -2,7 +2,7 @@
 
 A single-repository RapidStrike competition app for Air University, Islamabad. Participants register and take a timed typing attempt, while organizers manage the RapidStrike Championship and audiences follow the MongoDB-backed RapidStrike Rankings, refreshed by polling. The production domain is https://rapidstrike.vercel.app/.
 
-The social preview image is `client/public/og-image.jpeg`; canonical, Open Graph, and large-image Twitter card metadata use the production domain above.
+The 1200×630 social preview image is `client/public/og-image.jpeg`. Canonical, Open Graph, and large-image Twitter card metadata use the production domain above. The sitemap lists the public landing, competition, and leaderboard routes; organizer and projector pages are excluded from indexing.
 
 ## Stack and architecture
 
