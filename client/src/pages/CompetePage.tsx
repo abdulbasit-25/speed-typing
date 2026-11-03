@@ -108,6 +108,7 @@ export function CompetePage() {
         session && competition ? <ReadyPanel competition={competition} session={session} onStart={onAttemptStarted} onError={setError} /> :
         <RegistrationPanel competition={competition} onRegistered={onRegistered} onError={setError} />}
       <div className="compete-footnote"><ShieldCheck size={16} /><span>Timing and scoring are calculated by the competition server. A browser-based test cannot be made perfectly cheat-proof.</span></div>
+      <p className="word-practice-link">Looking for a quick memory drill? <Link to="/word-typing">Try Word Flash practice <ArrowRight size={14} /></Link></p>
     </main>
   );
 }
