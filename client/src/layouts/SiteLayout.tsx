@@ -11,6 +11,7 @@ export function SiteLayout() {
         </Link>
         <nav className="site-nav" aria-label="Main navigation">
           <NavLink to="/compete">Compete</NavLink>
+          <NavLink to="/word-typing">Word flash</NavLink>
           <NavLink to="/leaderboard">Rankings</NavLink>
           <NavLink to="/display">Projector</NavLink>
         </nav>
@@ -25,6 +26,7 @@ export function SiteLayout() {
         <nav className="footer-links" aria-label="Footer navigation">
           <span className="eyebrow">THE CHAMPIONSHIP</span>
           <Link to="/compete">Enter the competition</Link>
+          <Link to="/word-typing">Word flash practice</Link>
           <Link to="/leaderboard">RapidStrike Rankings</Link>
           <Link to="/display">Projector display</Link>
         </nav>
