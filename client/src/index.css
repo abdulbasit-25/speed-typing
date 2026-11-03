@@ -631,3 +631,62 @@ body { line-height: 1.5; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+.word-page { max-width: 920px; }
+.word-practice-badge { margin-left: auto; color: var(--muted); font: 8px var(--mono); letter-spacing: .1em; }
+.word-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 44px; margin: 32px 0 35px; }
+.word-intro .page-title { margin: 0; }
+.word-intro .page-intro { max-width: 450px; }
+.word-how-to { max-width: 250px; padding: 0 0 9px 18px; border-left: 1px solid var(--border); }
+.word-how-to p { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.word-game-panel { padding: 26px 34px 24px; border-top: 3px solid var(--red); background: var(--charcoal); color: var(--ivory); box-shadow: 0 16px 42px rgba(32,34,31,.14); }
+.word-game-topline { min-height: 31px; display: flex; justify-content: space-between; align-items: center; }
+.word-game-topline .eyebrow { color: #a6a79f; }
+.word-time { display: inline-flex; align-items: center; gap: 7px; color: var(--ivory); font: 700 24px var(--mono); }
+.word-time small { color: #a6a79f; font: 9px var(--mono); }
+.word-time.time-urgent { color: #ef756c; }
+.word-prompt { min-height: 230px; display: flex; justify-content: center; align-items: center; flex-direction: column; gap: 14px; margin: 18px 0 20px; border: 1px solid #4e514b; background: var(--graphite); text-align: center; }
+.word-prompt strong { color: var(--ivory); font: 600 clamp(36px, 7vw, 66px) var(--mono); letter-spacing: -.055em; animation: word-appear .22s ease-out; }
+.word-prompt > span { color: #a6a79f; font: 10px var(--mono); letter-spacing: .14em; }
+.word-prompt svg { color: #e9685f; }
+.word-phase-ready .word-placeholder, .word-phase-finished > span { color: #e9685f; font-size: 60px; }
+@keyframes word-appear { from { opacity: .25; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+.word-ready-controls { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; max-width: 620px; margin: 0 auto; }
+.word-ready-controls .field-label { width: min(260px, 100%); color: var(--ivory); }
+.word-ready-controls .text-input { margin-top: 6px; }
+.word-entry-form { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; max-width: 620px; margin: 0 auto; }
+.word-entry-input { min-width: 0; font: 16px var(--mono); }
+.word-entry-form .button { min-width: 145px; }
+.word-feedback { grid-column: 1/-1; min-height: 22px; margin: 3px 0 0; color: #bbc7b8; font-size: 10px; }
+.word-feedback.feedback-error { color: #ef8a81; }
+.word-round-stats { display: flex; justify-content: center; gap: 34px; margin-top: 22px; color: #a6a79f; font: 9px var(--mono); }
+.word-round-stats strong { color: var(--ivory); font-size: 12px; }
+.word-result { display: grid; grid-template-columns: repeat(4,1fr); gap: 20px; padding-top: 8px; }
+.word-result > div { display: flex; flex-direction: column; gap: 7px; }
+.word-result > div .eyebrow { color: #a6a79f; font-size: 8px; }
+.word-result > div > strong { color: var(--ivory); font: 600 27px var(--mono); }
+.word-result > .button { grid-column: 1/-1; justify-self: center; margin-top: 7px; }
+.word-practice-note { margin: 17px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.word-page-links { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 25px; }
+.word-page-links a, .word-practice-link a { display: inline-flex; align-items: center; gap: 7px; color: var(--charcoal); font-size: 10px; font-weight: 650; }
+.word-page-links a:hover, .word-practice-link a:hover { color: var(--red); }
+.word-practice-link { display: flex; align-items: center; gap: 7px; margin: 20px 0 0; color: var(--muted); font-size: 10px; }
+@media (max-width: 620px) {
+  .word-practice-badge { font-size: 7px; }
+  .word-intro { align-items: flex-start; flex-direction: column; gap: 18px; margin: 24px 0; }
+  .word-intro .page-title { font-size: 54px; }
+  .word-how-to { max-width: none; padding-left: 12px; }
+  .word-game-panel { padding: 18px 14px; }
+  .word-prompt { min-height: 190px; margin-block: 14px; }
+  .word-ready-controls { align-items: stretch; flex-direction: column; }
+  .word-ready-controls .field-label { width: 100%; }
+  .word-ready-controls .button { width: 100%; }
+  .word-entry-form { grid-template-columns: 1fr; }
+  .word-entry-form .button { width: 100%; }
+  .word-feedback { grid-column: auto; }
+  .word-round-stats { justify-content: space-between; gap: 8px; font-size: 8px; }
+  .word-result { grid-template-columns: repeat(2,1fr); }
+  .word-result > .button { grid-column: 1/-1; justify-self: stretch; }
+  .word-page-links { flex-direction: column; gap: 12px; }
+  .word-practice-link { align-items: flex-start; flex-direction: column; }
+}
