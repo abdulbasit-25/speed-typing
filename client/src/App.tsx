@@ -6,6 +6,7 @@ import { CompetePage } from "./pages/CompetePage.js";
 import { DisplayPage } from "./pages/DisplayPage.js";
 import { HomePage } from "./pages/HomePage.js";
 import { LeaderboardPage } from "./pages/LeaderboardPage.js";
+import { WordTypingPage } from "./pages/WordTypingPage.js";
 
 const routeMetadata: Record<string, { title: string; description: string; indexable: boolean }> = {
   "/": {
@@ -16,6 +17,11 @@ const routeMetadata: Record<string, { title: string; description: string; indexa
   "/compete": {
     title: "Compete | RapidStrike Championship",
     description: "Register for the RapidStrike Championship at Air University, Islamabad, and test your typing speed, accuracy, and focus.",
+    indexable: true,
+  },
+  "/word-typing": {
+    title: "Word Flash Practice | RapidStrike",
+    description: "Train your typing and recall with RapidStrike Word Flash: memorize a word before it disappears, then type it from memory.",
     indexable: true,
   },
   "/leaderboard": {
@@ -78,6 +84,7 @@ export default function App() {
         <Route element={<SiteLayout />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/compete" element={<CompetePage />} />
+          <Route path="/word-typing" element={<WordTypingPage />} />
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/admin" element={<AdminPage />} />
         </Route>
