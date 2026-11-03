@@ -2,6 +2,8 @@
 
 A single-repository RapidStrike competition app for Air University, Islamabad. Participants register and take a timed typing attempt, while organizers manage the RapidStrike Championship and audiences follow the MongoDB-backed RapidStrike Rankings, refreshed by polling. The production domain is https://rapidstrike.vercel.app/.
 
+The public Word Flash module is a separate, local practice drill: memorize each briefly displayed word and type it from memory. Its practice score is not submitted to official competition results.
+
 The 1200×630 social preview image is `client/public/og-image.jpeg`. Canonical, Open Graph, and large-image Twitter card metadata use the production domain above. The sitemap lists the public landing, competition, and leaderboard routes; organizer and projector pages are excluded from indexing.
 
 ## Stack and architecture
